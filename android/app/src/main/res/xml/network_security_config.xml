@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  O Android bloqueia HTTP (sem S) por padrão. Isto libera HTTP só para o servidor local de desenvolvimento.
+  Se usar celular físico, adicione o IP do seu PC (ex.: 192.168.0.15) abaixo.
+  Em produção use HTTPS e remova este arquivo.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- <domain includeSubdomains="false">192.168.0.15</domain> -->
+    </domain-config>
+</network-security-config>
