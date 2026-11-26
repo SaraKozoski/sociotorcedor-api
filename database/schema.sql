@@ -1,3 +1,4 @@
+SET NAMES utf8mb4;
 DROP DATABASE IF EXISTS sociotorcedor;
 CREATE DATABASE sociotorcedor CHARACTER SET utf8mb4;
 USE sociotorcedor;
@@ -31,11 +32,27 @@ CREATE TABLE usuarios (
   cpf VARCHAR(14) NULL UNIQUE,
   google_id VARCHAR(100) NULL UNIQUE,
   senha VARCHAR(255) NULL,
+  data_nascimento DATE NULL,
+  logradouro VARCHAR(150) NULL,
+  numero VARCHAR(10) NULL,
+  cep VARCHAR(9) NULL,
+  cidade VARCHAR(100) NULL,
+  uf CHAR(2) NULL,
   plano_id INT NULL,
   saldo DECIMAL(10,2) NOT NULL DEFAULT 0,
   pontos INT NOT NULL DEFAULT 0,
   criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (plano_id) REFERENCES planos(id)
+);
+
+-- Tokens de sessão usados pelo app (Authorization: Bearer <token>)
+CREATE TABLE tokens (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  usuario_id INT NOT NULL,
+  token CHAR(64) NOT NULL UNIQUE,
+  expira_em DATETIME NOT NULL,
+  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
 );
 
 CREATE TABLE assinaturas (
@@ -305,3 +322,11 @@ INSERT INTO produtos (categoria_id, nome, preco, pontos_resgate) VALUES
 (2, 'Suco', 8.50, NULL),
 (3, 'Sorvete', 12.00, NULL),
 (2, 'Água', 5.00, NULL);
+
+-- Usuários de teste (senha de ambos: 123456)
+INSERT INTO usuarios (nome, email, cpf, senha, plano_id, saldo, pontos) VALUES
+('João Torcedor', 'joao@teste.com', '12345678901', '$2y$10$w/WA5OocBToDewh4.2PhNuPtmzy7c/ik/gXez4vdzlq0hq3Oftxdu', (SELECT id FROM planos WHERE tipo = 'GOLD'), 100.00, 50),
+('Maria Torcedora', 'maria@teste.com', '98765432100', '$2y$10$w/WA5OocBToDewh4.2PhNuPtmzy7c/ik/gXez4vdzlq0hq3Oftxdu', NULL, 0, 0);
+
+INSERT INTO assinaturas (usuario_id, plano_id, status, data_inicio, data_fim) VALUES
+(1, (SELECT id FROM planos WHERE tipo = 'GOLD'), 'ativa', CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 YEAR));

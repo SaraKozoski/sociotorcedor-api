@@ -1,54 +1,77 @@
 <?php
-header("Content-Type: application/json; charset=UTF-8");
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(204);
+/**
+ * Perfil do usuário logado (header Authorization: Bearer <token>)
+ *
+ * GET    usuarios.php                          -> perfil (saldo, pontos, plano...)
+ * POST   usuarios.php                          -> cadastro (mesmo que auth.php?acao=cadastro)
+ * PUT    usuarios.php  { "nome"?, "email"? }   -> atualiza o perfil
+ * PUT    usuarios.php?acao=senha { "senha_atual", "nova_senha" }
+ * DELETE usuarios.php                          -> exclui a própria conta
+ */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $_GET['acao'] = 'cadastro';
+    require __DIR__ . '/auth.php';
     exit;
 }
 
-include_once '../config/database.php';
+require_once __DIR__ . '/../config/bootstrap.php';
 
-$database = new Database();
-$db = $database->getConnection();
-
-$method = $_SERVER['REQUEST_METHOD'];
+$usuario = usuarioAutenticado($db);
+$uid = (int) $usuario['id'];
 
 switch ($method) {
     case 'GET':
-        $stmt = $db->query("SELECT id, nome, email, cpf, saldo, pontos, plano_id, criado_em FROM usuarios");
-        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-        break;
-
-    case 'POST':
-        $data = json_decode(file_get_contents("php://input"));
-        $stmt = $db->prepare("INSERT INTO usuarios (nome, email, cpf, senha) VALUES (:nome, :email, :cpf, :senha)");
-        $stmt->execute([
-            ':nome'  => $data->nome,
-            ':email' => $data->email,
-            ':cpf'   => $data->cpf ?? null,
-            ':senha' => password_hash($data->senha, PASSWORD_BCRYPT)
-        ]);
-        echo json_encode(["message" => "Usuário criado com sucesso", "id" => $db->lastInsertId()]);
-        break;
+        responder(perfilUsuario($db, $uid));
 
     case 'PUT':
-        $data = json_decode(file_get_contents("php://input"));
-        $stmt = $db->prepare("UPDATE usuarios SET nome = :nome, email = :email WHERE id = :id");
-        $stmt->execute([
-            ':nome'  => $data->nome,
-            ':email' => $data->email,
-            ':id'    => $data->id
-        ]);
-        echo json_encode(["message" => "Usuário atualizado com sucesso"]);
-        break;
+        $data = lerJson();
+
+        if (($_GET['acao'] ?? '') === 'senha') {
+            exigirCampos($data, ['senha_atual', 'nova_senha']);
+            if (!password_verify($data['senha_atual'], $usuario['senha'] ?? '')) {
+                erro("Senha atual incorreta", 401);
+            }
+            if (strlen($data['nova_senha']) < 6) {
+                erro("A senha deve ter no mínimo 6 caracteres");
+            }
+            $db->prepare("UPDATE usuarios SET senha = :s WHERE id = :id")
+               ->execute([':s' => password_hash($data['nova_senha'], PASSWORD_BCRYPT), ':id' => $uid]);
+            responder(["message" => "Senha alterada com sucesso"]);
+        }
+
+        $nome  = isset($data['nome']) ? trim($data['nome']) : $usuario['nome'];
+        $email = isset($data['email']) ? trim($data['email']) : $usuario['email'];
+        if ($nome === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            erro("Nome ou e-mail inválido");
+        }
+        $stmt = $db->prepare("SELECT id FROM usuarios WHERE email = :email AND id <> :id");
+        $stmt->execute([':email' => $email, ':id' => $uid]);
+        if ($stmt->fetch()) {
+            erro("E-mail já cadastrado", 409);
+        }
+        $db->prepare("UPDATE usuarios SET nome = :nome, email = :email WHERE id = :id")
+           ->execute([':nome' => $nome, ':email' => $email, ':id' => $uid]);
+        responder(perfilUsuario($db, $uid));
 
     case 'DELETE':
-        $data = json_decode(file_get_contents("php://input"));
-        $stmt = $db->prepare("DELETE FROM usuarios WHERE id = :id");
-        $stmt->execute([':id' => $data->id]);
-        echo json_encode(["message" => "Usuário deletado com sucesso"]);
-        break;
+        // Remove dados dependentes antes do usuário (chaves estrangeiras).
+        emTransacao($db, function () use ($db, $uid) {
+            foreach ([
+                "DELETE pi FROM pedido_itens pi JOIN pedidos p ON p.id = pi.pedido_id WHERE p.usuario_id = :id",
+                "DELETE FROM pedidos WHERE usuario_id = :id",
+                "DELETE FROM resgates WHERE usuario_id = :id",
+                "DELETE FROM palpites WHERE usuario_id = :id",
+                "DELETE FROM ingressos_usuario WHERE usuario_id = :id",
+                "DELETE FROM assinaturas WHERE usuario_id = :id",
+                "DELETE FROM carteira_transacoes WHERE usuario_id = :id",
+                "DELETE FROM pontos_transacoes WHERE usuario_id = :id",
+                "DELETE FROM usuarios WHERE id = :id",
+            ] as $sql) {
+                $db->prepare($sql)->execute([':id' => $uid]);
+            }
+        });
+        responder(["message" => "Conta excluída com sucesso"]);
+
+    default:
+        erro("Método não permitido", 405);
 }
